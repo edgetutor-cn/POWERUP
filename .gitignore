@@ -1,0 +1,17 @@
+# 构建/调试产物（不推送到静态站仓库）
+__pycache__/
+build.log
+gen_audio.log
+*.pyc
+.DS_Store
+
+# 构建脚本与中间产物（含本机绝对路径，仅本地用）
+build_powerup.py
+gen_audio.py
+parse_tree.py
+_verify.py
+audio_tasks.json
+
+# GitHub API 响应文件（可能含账号信息）
+resp_create.json
+resp_user.json

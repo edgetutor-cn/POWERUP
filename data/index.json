@@ -1,0 +1,44 @@
+[
+ {
+  "level": "L0",
+  "title": "Power Up Starter",
+  "units": 7,
+  "lessons": 56,
+  "chips": 4405
+ },
+ {
+  "level": "L1",
+  "title": "Power Up 1",
+  "units": 9,
+  "lessons": 49,
+  "chips": 4975
+ },
+ {
+  "level": "L2",
+  "title": "Power Up 2",
+  "units": 9,
+  "lessons": 63,
+  "chips": 8124
+ },
+ {
+  "level": "L3",
+  "title": "Power Up 3",
+  "units": 10,
+  "lessons": 66,
+  "chips": 9828
+ },
+ {
+  "level": "L4",
+  "title": "Power Up 4",
+  "units": 9,
+  "lessons": 66,
+  "chips": 6419
+ },
+ {
+  "level": "L5",
+  "title": "Power Up 5",
+  "units": 9,
+  "lessons": 73,
+  "chips": 6914
+ }
+]
