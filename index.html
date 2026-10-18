@@ -76,6 +76,23 @@
   .img-gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; margin-top:12px; }
   .img-gallery img { width:100%; border-radius:10px; border:1px solid #eef2f7; background:#f8fafc; }
   .footer { text-align:center; font-size:11.5px; color:#9ca3af; margin-top:26px; line-height:1.7; }
+
+  /* 简洁 / 课本 预习模式切换 */
+  .mode-bar { background:white; border-radius:14px; padding:12px 14px; box-shadow:0 4px 12px rgba(0,0,0,.05); margin-bottom:16px; border:1px solid #f3f4f6; }
+  .mode-switch { display:flex; gap:10px; }
+  .mode-btn { flex:1; text-align:left; padding:12px 14px; border-radius:12px; border:2px solid #e5e7eb; background:#f8fafc; cursor:pointer; transition:all .2s; }
+  .mode-btn:hover { border-color:#93c5fd; }
+  .mode-btn.active { border-color:#0052CC; background:#eff6ff; box-shadow:0 6px 16px rgba(0,82,204,.12); }
+  .mode-btn .mt { font-size:14px; font-weight:800; color:#1f2937; display:flex; align-items:center; gap:7px; }
+  .mode-btn .md { font-size:11.5px; color:#6b7280; margin-top:4px; line-height:1.5; }
+  .mode-btn.active .mt { color:#0052CC; }
+  .mode-tag-easy { font-size:10px; font-weight:800; padding:2px 8px; border-radius:20px; background:#dcfce7; color:#166534; }
+  .mode-tag-full { font-size:10px; font-weight:800; padding:2px 8px; border-radius:20px; background:#fef3c7; color:#92400e; }
+  .simple-panel { background:white; border-radius:16px; padding:16px 18px; margin-bottom:14px; box-shadow:0 4px 12px rgba(0,0,0,.05); border:1px solid #f3f4f6; }
+  .simple-title { font-size:14px; font-weight:800; color:#1f2937; margin-bottom:4px; }
+  .simple-meta { font-size:12px; color:#9ca3af; margin-bottom:12px; line-height:1.6; }
+  .simple-imgs { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:8px; margin-top:14px; }
+  .simple-imgs img { width:100%; border-radius:10px; border:1px solid #eef2f7; background:#f8fafc; }
 </style>
 </head>
 <body>
@@ -247,7 +264,7 @@ function renderLessonTabs(){
   unit.lessons.forEach((le,i)=>{
     const tag=TYPE_LABEL[le.type]?`<span class="type-tag">${TYPE_LABEL[le.type]}</span>`:'';
     const t=el(`<div class="lesson-tab${i===CUR.lessonIdx?' active':''}">${le.name}${tag}</div>`);
-    t.onclick=()=>{ CUR.lessonIdx=i; renderLessonTabs(); renderLesson(); };
+    t.onclick=()=>{ CUR.lessonIdx=i; CUR.lessonMode='simple'; renderLessonTabs(); renderLesson(); };
     box.appendChild(t);
   });
 }
@@ -255,19 +272,87 @@ function renderLessonTabs(){
 function renderLesson(){
   const unit=CUR.data.units[CUR.unitIdx];
   const le=unit.lessons[CUR.lessonIdx];
+  if(!CUR.lessonMode) CUR.lessonMode='simple';   // 每节课默认进「简洁预习」
   const box=document.getElementById('lessonContent');
   box.innerHTML='';
-  const head=el(`<div><div class="lesson-head">${le.name}</div>
-    <div class="lesson-sub">${unit.name||('U'+unit.num)} · 共 ${le.slides.length} 页 · 点击 🔊 听发音</div></div>`);
+
+  const typeTag = le.type ? `<span class="type-tag">${escapeHtml(le.type)}</span>` : '';
+  const head=el(`<div><div class="lesson-head">${escapeHtml(le.name)} ${typeTag}</div>
+    <div class="lesson-sub">${escapeHtml(unit.name||('U'+unit.num))} · 共 ${le.slides.length} 页 · 点击 🔊 听发音</div></div>`);
   box.appendChild(head);
 
+  // 模式切换条 + 说明（让学员一眼知道哪个最简单 / 哪个最全）
+  const bar=el(`<div class="mode-bar">
+    <div class="mode-switch">
+      <button class="mode-btn ${CUR.lessonMode==='simple'?'active':''}" data-mode="simple">
+        <div class="mt">🌿 简洁预习 <span class="mode-tag-easy">最快</span></div>
+        <div class="md">只列本课核心单词 + 少量配图，几分钟快速过一遍发音</div>
+      </button>
+      <button class="mode-btn ${CUR.lessonMode==='full'?'active':''}" data-mode="full">
+        <div class="mt">📖 课本预习 <span class="mode-tag-full">最全</span></div>
+        <div class="md">逐页还原课件：单词 + 句子 + 全部配图，深度预习</div>
+      </button>
+    </div>
+  </div>`);
+  bar.querySelectorAll('.mode-btn').forEach(b=>{
+    b.onclick=()=>{ CUR.lessonMode=b.getAttribute('data-mode'); renderLesson(); };
+  });
+  box.appendChild(bar);
+
+  if(CUR.lessonMode==='full') renderLessonFull(le, box);
+  else renderLessonSimple(le, box);
+
+  // 绑定「朗读本课单词」
+  const pb=document.getElementById('playAllBtn');
+  pb.disabled=false; pb.innerHTML='<i class="fa fa-play"></i> 朗读本课单词';
+  pb.onclick=()=>playLessonWords(le, CUR.lessonMode, pb);
+}
+
+// 简洁版：本课核心单词（有发音、去重）平铺 + 少量配图
+function renderLessonSimple(le, box){
+  const seen=new Set(); const vocab=[];
+  le.slides.forEach(s=>(s.chips||[]).forEach(ch=>{ if(ch.a && !seen.has(ch.t)){ seen.add(ch.t); vocab.push(ch); } }));
+  const iseen=new Set(); const imgs=[];
+  le.slides.forEach(s=>(s.imgs||[]).forEach(src=>{ if(!iseen.has(src)){ iseen.add(src); imgs.push(src); } }));
+  imgs.splice(6);
+
+  const panel=el(`<div class="simple-panel">
+    <div class="simple-title">本课核心单词 · ${vocab.length} 个</div>
+    <div class="simple-meta">点 🔊 听英式发音，或直接点「朗读本课单词」顺序播放。想看完整课件请切到「课本预习」。</div>
+  </div>`);
+  const g=el('<div class="chip-grid"></div>');
+  if(vocab.length){
+    vocab.forEach(ch=>{
+      const w=el(`<div class="word-card"><div class="word-en">${escapeHtml(ch.t)}</div>
+        <button class="speak-btn"><i class="fa fa-volume-up"></i></button></div>`);
+      w.querySelector('.speak-btn').onclick=(e)=>playAudio(ch.a, ch.t, e.currentTarget);
+      g.appendChild(w);
+    });
+  } else {
+    g.appendChild(el('<div class="simple-meta">本课为句型 / 故事课，核心单词较少，请切到「课本预习」看完整内容。</div>'));
+  }
+  panel.appendChild(g);
+  if(imgs.length){
+    const gal=el('<div class="simple-imgs"></div>');
+    imgs.forEach(src=>{
+      const im=el(`<img loading="lazy" alt="">`);
+      const cdn=(AUDIO_BASE||MIRRORS[0])+src;
+      im.src=cdn; let triedRel=false;
+      im.onerror=()=>{ if(!triedRel){ triedRel=true; im.src=src; } else { im.style.display='none'; } };
+      gal.appendChild(im);
+    });
+    panel.appendChild(gal);
+  }
+  box.appendChild(panel);
+}
+
+// 课本版：逐页还原（全部 chip + 全部配图）
+function renderLessonFull(le, box){
   le.slides.forEach(s=>{
-    // 跳过既无文本也无配图的空页（纯图片页且配图未抽取成功时）
     const hasChips = s.chips && s.chips.length;
     const hasImgs = s.imgs && s.imgs.length;
     if(!hasChips && !hasImgs) return;
     const card=el(`<div class="slide-card"><span class="slide-no">第 ${s.idx} 页</span></div>`);
-    // chips
     if(s.chips && s.chips.length){
       const g=el('<div class="chip-grid"></div>');
       s.chips.forEach(ch=>{
@@ -283,14 +368,12 @@ function renderLesson(){
       });
       card.appendChild(g);
     }
-    // images（走最快镜像 CDN，SW 跨域缓存；失败回退同站）
     if(s.imgs && s.imgs.length){
       const gal=el('<div class="img-gallery"></div>');
       s.imgs.forEach(src=>{
         const im=el(`<img loading="lazy" alt="">`);
         const cdn=(AUDIO_BASE||MIRRORS[0])+src;
-        im.src=cdn;
-        let triedRel=false;
+        im.src=cdn; let triedRel=false;
         im.onerror=()=>{ if(!triedRel){ triedRel=true; im.src=src; } else { im.style.display='none'; } };
         gal.appendChild(im);
       });
@@ -298,16 +381,16 @@ function renderLesson(){
     }
     box.appendChild(card);
   });
-
-  // 绑定「朗读本课单词」
-  const pb=document.getElementById('playAllBtn');
-  pb.disabled=false; pb.innerHTML='<i class="fa fa-play"></i> 朗读本课单词';
-  pb.onclick=()=>playLessonWords(le, pb);
 }
 
-async function playLessonWords(le, btn){
+async function playLessonWords(le, mode, btn){
   const items=[];
-  le.slides.forEach(s=>(s.chips||[]).forEach(ch=>{ if(ch.a) items.push(ch); }));
+  if(mode==='full'){
+    le.slides.forEach(s=>(s.chips||[]).forEach(ch=>{ if(ch.a) items.push(ch); }));
+  } else {
+    const seen=new Set();
+    le.slides.forEach(s=>(s.chips||[]).forEach(ch=>{ if(ch.a && !seen.has(ch.t)){ seen.add(ch.t); items.push(ch); } }));
+  }
   if(!items.length) return;
   btn.disabled=true; const old=btn.innerHTML; btn.innerHTML='<i class="fa fa-spinner fa-spin"></i> 播放中…';
   for(const ch of items){
