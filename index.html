@@ -138,27 +138,47 @@ const PROBE_FILE = 'data/index.json';
 const _blobCache = new Map();
 const _audioEls = new Map();
 function uniq(a){ return [...new Set(a)]; }
+// 竞速取音频：5 个镜像同时发，谁先返回用谁（首字节最快，避免单镜像卡顿）
 function fetchBlob(rel){
   if(_blobCache.has(rel)) return _blobCache.get(rel);
   const order = uniq([AUDIO_BASE].concat(MIRRORS));
   const p = (async()=>{
-    let lastErr;
-    for(const base of order){
-      try{
-        const ctrl=new AbortController();
-        const to=setTimeout(()=>ctrl.abort(), 7000);
-        const res=await fetch(base+rel, {signal:ctrl.signal, cache:'force-cache'});
-        clearTimeout(to);
-        if(!res.ok) throw new Error('http '+res.status);
-        return URL.createObjectURL(await res.blob());
-      }catch(e){ lastErr=e; }
-    }
-    throw lastErr || new Error('all mirrors failed');
+    let ctrlList=[];
+    const attempts = order.map(base=>{
+      const ctrl=new AbortController(); ctrlList.push(ctrl);
+      const to=setTimeout(()=>ctrl.abort(), 8000);
+      return fetch(base+rel, {signal:ctrl.signal, cache:'force-cache'})
+        .then(r=>{ clearTimeout(to); if(!r.ok) throw new Error('http '+r.status); return r.blob(); })
+        .then(b=>{ ctrlList.forEach(c=>{ if(c!==ctrl) try{c.abort();}catch(e){} }); return b; })
+        .catch(e=>{ clearTimeout(to); ctrl.abort(); throw e; });
+    });
+    const b = await Promise.any(attempts);
+    return URL.createObjectURL(b);
   })();
   _blobCache.set(rel, p);
   return p;
 }
-function warm(rel){ fetchBlob(rel).catch(()=>{}); }
+// 安静预取（单镜像，不竞速）：用于进课后后台把本课音频拉成本地 blob
+function prefetchOne(rel){
+  if(_blobCache.has(rel)) return _blobCache.get(rel);
+  const base=AUDIO_BASE||MIRRORS[0];
+  const p=(async()=>{ const r=await fetch(base+rel,{cache:'force-cache'}); if(!r.ok) throw new Error('http '+r.status); return URL.createObjectURL(await r.blob()); })();
+  _blobCache.set(rel, p);
+  return p;
+}
+// 进课程后静默预取本课所有单词音频（4 并发），点哪个都命中本地、零延迟
+function prefetchLessonAudio(le){
+  const seen=new Set(); const urls=[];
+  le.slides.forEach(s=>(s.chips||[]).forEach(ch=>{ if(ch.a && !seen.has(ch.a)){ seen.add(ch.a); urls.push(ch.a); } }));
+  if(!urls.length) return;
+  let i=0, active=0;
+  (function pump(){
+    while(i<urls.length && active<4){
+      const u=urls[i++]; active++;
+      prefetchOne(u).catch(()=>{}).finally(()=>{ active--; pump(); });
+    }
+  })();
+}
 function detectFastestCDN(){
   let won=false;
   MIRRORS.forEach(base=>{
@@ -174,13 +194,31 @@ async function playAudio(url, text, btn){
   const stop=()=>{ if(btn) btn.classList.remove('speaking'); };
   if(!url){ if(text) fallbackSpeak(text,btn); return; }
   try{
-    const objUrl=await fetchBlob(url);
+    // 1) 命中本地 blob 缓存（进课后已预取）-> 零网络延迟，直接播
+    if(_blobCache.has(url)){
+      const objUrl=await _blobCache.get(url);
+      _playObj(url, objUrl, stop); return;
+    }
+    // 2) 未命中：用最快镜像流式直连，首字节即响（不等整段下完）
+    const base=AUDIO_BASE||MIRRORS[0];
     let au=_audioEls.get(url);
     if(!au){ au=new Audio(); _audioEls.set(url,au); }
-    au.src=objUrl; au.onended=stop;
+    au.onended=stop;
+    au.onerror=()=>{ fetchBlob(url).then(o=>_playObj(url,o,stop)).catch(()=>{ stop(); if(text) fallbackSpeak(text,btn); }); };
+    au.src=base+url;
     try{ au.currentTime=0; }catch(e){}
-    await au.play();
+    au.play().catch(()=>{});
+    fetchBlob(url).catch(()=>{}); // 3) 后台填缓存，二次点击零延迟
   }catch(e){ stop(); if(text) fallbackSpeak(text,btn); }
+}
+function _playObj(url, objUrl, stop){
+  let au=_audioEls.get(url);
+  if(!au){ au=new Audio(); _audioEls.set(url,au); }
+  try{ au.pause(); }catch(e){}
+  au.onended=stop; au.onerror=stop;
+  au.src=objUrl;
+  try{ au.currentTime=0; }catch(e){}
+  au.play().catch(stop);
 }
 function fallbackSpeak(text, btn){
   if(!text || !('speechSynthesis' in window)) return;
@@ -306,6 +344,9 @@ function renderLesson(){
   const pb=document.getElementById('playAllBtn');
   pb.disabled=false; pb.innerHTML='<i class="fa fa-play"></i> 朗读本课单词';
   pb.onclick=()=>playLessonWords(le, CUR.lessonMode, pb);
+
+  // 进课后立即后台预取本课所有单词音频 -> 点哪个都秒响
+  prefetchLessonAudio(le);
 }
 
 // 简洁版：本课核心单词（有发音、去重）平铺 + 少量配图
